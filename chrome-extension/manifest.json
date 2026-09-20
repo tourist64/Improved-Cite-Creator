@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "Cite Creator",
+  "version": "1.0.0",
+  "description": "Build accurate debate citations from the page you're reading, with author/date/quals you can review before copying.",
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "permissions": ["activeTab", "scripting", "storage"],
+  "host_permissions": ["<all_urls>"]
+}

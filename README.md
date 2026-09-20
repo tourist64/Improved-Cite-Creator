@@ -1,7 +1,14 @@
 # Cite Creator
 
-A Google Docs add-on for building debate citations from a URL, without the
-inaccuracies of the original Cite Creator:
+Two separate tools for building debate citations without the inaccuracies
+of the original Cite Creator - pick whichever fits your workflow:
+
+- **This repo's root files** - a Google Docs add-on (below).
+- **[`chrome-extension/`](./chrome-extension)** - a Chrome extension that
+  works on any page you're reading, no Google Doc required. See its own
+  [README](./chrome-extension/README.md) for setup.
+
+Both share the same accuracy fixes and citation format:
 
 - Uses the article's structured data (JSON-LD / meta tags) instead of naive
   scraping, so publish dates are picked up far more reliably, including when
