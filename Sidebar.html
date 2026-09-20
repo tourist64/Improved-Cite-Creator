@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html>
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<style>
+  body {
+    font-family: 'Google Sans', Roboto, Arial, sans-serif;
+    font-size: 13px;
+    color: #202124;
+    margin: 0;
+    padding: 12px;
+  }
+  h2 {
+    font-size: 15px;
+    margin: 0 0 8px;
+  }
+  label {
+    display: block;
+    font-weight: 600;
+    margin: 10px 0 3px;
+    font-size: 12px;
+  }
+  input[type="text"], textarea, select {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 5px 6px;
+    border: 1px solid #dadce0;
+    border-radius: 4px;
+    font-size: 12px;
+    font-family: inherit;
+  }
+  textarea {
+    resize: vertical;
+  }
+  .row {
+    display: flex;
+    gap: 8px;
+  }
+  .row > div {
+    flex: 1;
+  }
+  .checkbox-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+  }
+  .checkbox-row label {
+    margin: 0;
+    font-weight: normal;
+  }
+  button {
+    margin-top: 10px;
+    padding: 7px 14px;
+    border: none;
+    border-radius: 4px;
+    background: #1a73e8;
+    color: white;
+    font-weight: 600;
+    cursor: pointer;
+    font-size: 12px;
+  }
+  button.secondary {
+    background: #f1f3f4;
+    color: #202124;
+  }
+  button:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+  #status {
+    margin-top: 8px;
+    font-size: 12px;
+    min-height: 16px;
+  }
+  .status.error {
+    color: #c5221f;
+  }
+  #preview {
+    height: 90px;
+    background: #f8f9fa;
+  }
+  details {
+    margin-top: 16px;
+    border-top: 1px solid #e0e0e0;
+    padding-top: 8px;
+  }
+  summary {
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 12px;
+  }
+  hr {
+    border: none;
+    border-top: 1px solid #e0e0e0;
+    margin: 14px 0;
+  }
+</style>
+</head>
+<body>
+  <h2>Cite Creator</h2>
+
+  <label for="url">Article URL</label>
+  <input type="text" id="url" placeholder="https://...">
+  <button id="fetchBtn">Fetch citation info</button>
+  <div id="status"></div>
+
+  <hr>
+
+  <div class="checkbox-row">
+    <input type="checkbox" id="isOrg">
+    <label for="isOrg">No individual author - cite the publication/company as author</label>
+  </div>
+
+  <div class="row">
+    <div>
+      <label for="first">First name</label>
+      <input type="text" id="first">
+    </div>
+    <div>
+      <label for="last">Last name / org</label>
+      <input type="text" id="last">
+    </div>
+  </div>
+
+  <div class="row">
+    <div>
+      <label for="date">Publish date</label>
+      <input type="text" id="date">
+    </div>
+    <div>
+      <label for="year">Tag year</label>
+      <input type="text" id="year">
+    </div>
+  </div>
+
+  <label for="title">Title</label>
+  <input type="text" id="title">
+
+  <label for="publication">Publication</label>
+  <input type="text" id="publication">
+
+  <label for="quals">Author qualifications</label>
+  <input type="text" id="quals" placeholder="e.g. Senior Correspondent (often needs to be filled in by hand)">
+
+  <label for="accessed">Date accessed</label>
+  <input type="text" id="accessed">
+
+  <label for="preview">Preview</label>
+  <textarea id="preview" readonly></textarea>
+
+  <button id="insertBtn">Insert citation</button>
+
+  <details>
+    <summary>Settings</summary>
+    <label for="template">Citation template</label>
+    <textarea id="template" rows="3"></textarea>
+    <div class="row">
+      <div>
+        <label for="yearFormat">Tag year format</label>
+        <select id="yearFormat">
+          <option value="2">2-digit (e.g. 26)</option>
+          <option value="4">4-digit (e.g. 2026)</option>
+        </select>
+      </div>
+      <div>
+        <label for="dateFormat">Date pattern</label>
+        <input type="text" id="dateFormat" placeholder="M/d/yy">
+      </div>
+    </div>
+    <div class="checkbox-row">
+      <input type="checkbox" id="boldTag">
+      <label for="boldTag">Bold + underline the tagline (before ---)</label>
+    </div>
+    <button class="secondary" id="saveSettingsBtn">Save settings</button>
+  </details>
+
+<script>
+  var FIELD_IDS = ['first', 'last', 'date', 'year', 'title', 'publication', 'quals', 'accessed'];
+
+  function showStatus(msg, isError) {
+    var el = document.getElementById('status');
+    el.textContent = msg;
+    el.className = isError ? 'status error' : 'status';
+  }
+
+  function getFieldValues() {
+    var data = { url: document.getElementById('url').value };
+    FIELD_IDS.forEach(function (id) {
+      data[id] = document.getElementById(id).value;
+    });
+    return data;
+  }
+
+  function buildCitation(template, data) {
+    var map = {
+      '%last%': data.last || '',
+      '%first%': data.first || '',
+      '%y%': data.year || '',
+      '%date%': data.date || '',
+      '%title%': data.title || '',
+      '%publication%': data.publication || '',
+      '%url%': data.url || '',
+      '%quals%': data.quals || '',
+      '%accessed%': data.accessed || ''
+    };
+    var result = template;
+    Object.keys(map).forEach(function (key) {
+      result = result.split(key).join(map[key]);
+    });
+    return cleanupCitation(result);
+  }
+
+  function cleanupCitation(result) {
+    result = result.replace(/[ \t]+/g, ' ');
+    result = result.replace(/\(\s+/g, '(');
+    result = result.replace(/\s+\)/g, ')');
+    result = result.replace(/\s+,/g, ',');
+    // Collapse doubled/empty-field commas left behind by blank tokens
+    // (e.g. an empty %quals% or %first%), without touching real commas.
+    result = result.replace(/,(\s*,)+/g, ',');
+    result = result.replace(/,\s*\)/g, ')');
+    return result.trim();
+  }
+
+  function updatePreview() {
+    var template = document.getElementById('template').value;
+    document.getElementById('preview').value = buildCitation(template, getFieldValues());
+  }
+
+  function onFetchClick() {
+    var url = document.getElementById('url').value.trim();
+    if (!url) {
+      showStatus('Enter a URL first.', true);
+      return;
+    }
+    showStatus('Fetching...', false);
+    document.getElementById('fetchBtn').disabled = true;
+    google.script.run
+      .withSuccessHandler(onFetched)
+      .withFailureHandler(onFetchError)
+      .fetchCitationData(url);
+  }
+
+  function onFetched(data) {
+    document.getElementById('fetchBtn').disabled = false;
+    document.getElementById('url').value = data.url;
+    document.getElementById('first').value = data.first || '';
+    document.getElementById('last').value = data.last || '';
+    document.getElementById('isOrg').checked = !!data.isOrgAuthor;
+    document.getElementById('date').value = data.date || '';
+    document.getElementById('year').value = data.year || '';
+    document.getElementById('title').value = data.title || '';
+    document.getElementById('publication').value = data.publication || '';
+    document.getElementById('quals').value = data.quals || '';
+    document.getElementById('accessed').value = data.accessed || '';
+    applyOrgToggle();
+
+    if (data.isOrgAuthor) {
+      showStatus('No individual author found - used "' + data.last + '" as the author. Please double-check every field below before inserting.', false);
+    } else if (!data.date) {
+      showStatus('Fetched, but no publish date was found - please fill it in. Double-check the other fields too.', true);
+    } else {
+      showStatus('Fetched. Please review every field before inserting - automatic parsing can still miss things (especially quals).', false);
+    }
+    updatePreview();
+  }
+
+  function onFetchError(err) {
+    document.getElementById('fetchBtn').disabled = false;
+    showStatus('Could not fetch that page: ' + (err && err.message ? err.message : err) + '. You can still fill in the fields manually.', true);
+  }
+
+  function applyOrgToggle() {
+    var isOrg = document.getElementById('isOrg').checked;
+    var firstField = document.getElementById('first');
+    firstField.disabled = isOrg;
+    if (isOrg) firstField.value = '';
+    updatePreview();
+  }
+
+  function onInsertClick() {
+    var text = document.getElementById('preview').value;
+    if (!text) {
+      showStatus('Nothing to insert yet.', true);
+      return;
+    }
+    document.getElementById('insertBtn').disabled = true;
+    google.script.run
+      .withSuccessHandler(function () {
+        document.getElementById('insertBtn').disabled = false;
+        showStatus('Citation inserted.', false);
+      })
+      .withFailureHandler(function (err) {
+        document.getElementById('insertBtn').disabled = false;
+        showStatus('Could not insert: ' + (err && err.message ? err.message : err), true);
+      })
+      .insertCitationText(text);
+  }
+
+  function onSaveSettingsClick() {
+    var settings = {
+      template: document.getElementById('template').value,
+      yearFormat: document.getElementById('yearFormat').value,
+      dateFormat: document.getElementById('dateFormat').value,
+      boldTag: document.getElementById('boldTag').checked
+    };
+    google.script.run
+      .withSuccessHandler(function () {
+        showStatus('Settings saved.', false);
+      })
+      .withFailureHandler(function (err) {
+        showStatus('Could not save settings: ' + (err && err.message ? err.message : err), true);
+      })
+      .saveSettings(settings);
+  }
+
+  function loadSettings() {
+    google.script.run
+      .withSuccessHandler(function (s) {
+        document.getElementById('template').value = s.template;
+        document.getElementById('yearFormat').value = s.yearFormat;
+        document.getElementById('dateFormat').value = s.dateFormat;
+        document.getElementById('boldTag').checked = s.boldTag;
+        updatePreview();
+      })
+      .getSettings();
+  }
+
+  document.addEventListener('DOMContentLoaded', function () {
+    loadSettings();
+    document.getElementById('fetchBtn').addEventListener('click', onFetchClick);
+    document.getElementById('insertBtn').addEventListener('click', onInsertClick);
+    document.getElementById('saveSettingsBtn').addEventListener('click', onSaveSettingsClick);
+    document.getElementById('isOrg').addEventListener('change', applyOrgToggle);
+    document.getElementById('template').addEventListener('input', updatePreview);
+    FIELD_IDS.forEach(function (id) {
+      document.getElementById(id).addEventListener('input', updatePreview);
+    });
+    document.getElementById('url').addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        onFetchClick();
+      }
+    });
+  });
+</script>
+</body>
+</html>
