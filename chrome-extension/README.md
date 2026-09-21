@@ -27,6 +27,9 @@ straight to your clipboard.
 - Copies both plain text and rich HTML to the clipboard, so pasting into
   Google Docs/Word keeps the tagline (before `---`) bold and underlined
   automatically.
+- Extracts automatically on every page as it loads (a background content
+  script, no click needed) and caches the result per-tab, so opening the
+  popup shows a filled-in citation instantly.
 
 ## Install (unpacked, ~1 minute)
 
@@ -43,15 +46,22 @@ personal use install it as an unpacked extension:
 ## Using it
 
 1. Open the article you want to cite.
-2. Click the Cite Creator icon, then **Read current page**.
+2. Click the Cite Creator icon - the fields are already filled in (a
+   background content script scans every page as it loads, so there's
+   usually nothing to wait for).
 3. Review/correct every field (the preview updates live as you edit).
 4. Click **Copy citation**, then paste it into your card doc.
+
+If a page was open before you loaded the extension (or you navigated
+within a single-page app that changed the article without a full reload),
+the popup falls back to scanning on open, or click **Re-scan page** to
+force a fresh read.
 
 To cite a page you're not currently on, paste its URL into the **Article
 URL** field and click **Fetch this URL instead** - this does a background
 fetch of that page rather than reading your active tab, so it won't work on
-sites that require login or block automated requests; use "Read current
-page" for those instead.
+sites that require login or block automated requests; use the current tab
+for those instead.
 
 ## Settings
 
@@ -89,18 +99,27 @@ Default template:
 
 `manifest.json` requests:
 
-- `activeTab` + `scripting` - to read the page you're currently viewing when
-  you click **Read current page**. Only granted for the tab you're on, only
-  when you invoke the extension.
-- `storage` - to save your template/format settings.
-- `host_permissions: ["<all_urls>"]` - only needed for the optional **Fetch
-  this URL instead** feature (fetching a URL you paste, from a different
-  origin, without Chrome's normal CORS restrictions blocking it).
+- `activeTab` + `scripting` - used as a fallback to read the current page on
+  demand (when nothing's cached yet, or you click **Re-scan page**).
+- `storage` - to save your template/format settings, and to cache each
+  tab's auto-extracted data (`chrome.storage.session`, cleared per-tab when
+  it closes and entirely on browser restart - nothing persists beyond that
+  or leaves your machine).
+- `host_permissions: ["<all_urls>"]` - this is the one worth knowing about:
+  it's what lets the background content script (`content-script.js`) run
+  automatically on every site to auto-extract citation data without a
+  click, and is also used by the optional **Fetch this URL instead**
+  feature. Chrome will show this as "read and change all your data on all
+  websites" when you load the extension - the content script only ever
+  reads `document`/meta tags and never modifies the page or sends anything
+  off your machine.
 
-If you don't need the "paste any URL" feature and would rather the
-extension not request access to all sites, delete the `fetchUrlBtn`
-button/handler and the `host_permissions` line - "Read current page" alone
-only ever needs `activeTab`.
+If you'd rather trade the automatic, click-free extraction for a narrower
+extension, remove the `content_scripts` block from `manifest.json` (and the
+`background.js`/`chrome.storage.session` cache it feeds) and use the
+**Re-scan page** button on demand instead - `host_permissions` can then
+drop to just what "Fetch this URL instead" needs, or be removed too if you
+also cut that feature.
 
 ## Known limitations
 
@@ -110,4 +129,8 @@ only ever needs `activeTab`.
   etc.) as a last resort and can occasionally pick up the wrong text -
   always check it before copying.
 - "Fetch this URL instead" is a plain fetch of that URL's HTML, so it can't
-  see anything behind a login wall - use "Read current page" for those.
+  see anything behind a login wall - visit the page directly instead.
+- The auto-extract content script runs at `document_idle`, on `load`, and
+  once more ~1.5s later to catch JS-rendered JSON-LD - single-page apps
+  that swap articles in without a full page reload won't re-trigger it, so
+  use **Re-scan page** in that case.

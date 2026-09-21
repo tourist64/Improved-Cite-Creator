@@ -23,13 +23,7 @@ function init() {
     updatePreview();
   });
 
-  chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
-    if (tabs[0] && tabs[0].url) {
-      document.getElementById('url').value = tabs[0].url;
-    }
-  });
-
-  document.getElementById('fetchPageBtn').addEventListener('click', fetchFromActiveTab);
+  document.getElementById('fetchPageBtn').addEventListener('click', onRescanClick);
   document.getElementById('fetchUrlBtn').addEventListener('click', fetchFromTypedUrl);
   document.getElementById('copyBtn').addEventListener('click', onCopyClick);
   document.getElementById('isOrg').addEventListener('change', applyOrgToggle);
@@ -37,6 +31,56 @@ function init() {
   document.getElementById('template').addEventListener('input', updatePreview);
   FIELD_IDS.forEach(function (id) {
     document.getElementById(id).addEventListener('input', updatePreview);
+  });
+
+  loadCachedOrScan();
+}
+
+/**
+ * content-script.js auto-extracts on every page load and caches the result
+ * per-tab, so on a normal page this reads instantly with no scan needed.
+ * Only falls back to a live scan when nothing's cached yet (e.g. the page
+ * was open before the extension loaded, or before content-script.js has
+ * finished its first pass).
+ */
+function loadCachedOrScan() {
+  chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
+    var tab = tabs[0];
+    if (!tab || !tab.id) {
+      showStatus('No active tab found.', true);
+      return;
+    }
+    document.getElementById('url').value = tab.url || '';
+    if (!/^https?:/i.test(tab.url || '')) {
+      showStatus('Cite Creator can only read regular web pages. Paste a URL below instead.', false);
+      return;
+    }
+    var key = 'cite_' + tab.id;
+    chrome.storage.session.get(key, function (result) {
+      var cached = result[key];
+      if (cached) {
+        applyExtractedData(cached);
+      } else {
+        showStatus('Scanning page...', false);
+        scanTab(tab);
+      }
+    });
+  });
+}
+
+function onRescanClick() {
+  chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
+    var tab = tabs[0];
+    if (!tab || !tab.id) {
+      showStatus('No active tab found.', true);
+      return;
+    }
+    if (!/^https?:/i.test(tab.url || '')) {
+      showStatus('Cite Creator can only read regular web pages, not chrome:// or extension pages.', true);
+      return;
+    }
+    showStatus('Re-scanning page...', false);
+    scanTab(tab);
   });
 }
 
@@ -53,53 +97,41 @@ function currentFormatSettings() {
   };
 }
 
-function fetchFromActiveTab() {
-  showStatus('Reading the current page...', false);
-  chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
-    var tab = tabs[0];
-    if (!tab || !tab.id) {
-      showStatus('No active tab found.', true);
-      return;
-    }
-    if (!/^https?:/i.test(tab.url || '')) {
-      showStatus('Cite Creator can only read regular web pages, not chrome:// or extension pages.', true);
-      return;
-    }
-    var fmt = currentFormatSettings();
-    chrome.scripting.executeScript(
-      { target: { tabId: tab.id }, files: ['extractor.js'] },
-      function () {
-        if (chrome.runtime.lastError) {
-          showStatus('Could not access this page: ' + chrome.runtime.lastError.message, true);
-          return;
-        }
-        chrome.scripting.executeScript(
-          {
-            target: { tabId: tab.id },
-            func: function (dateFormat, yearFormat) {
-              return window.CiteCreatorExtractor.extract(document, location.href, {
-                dateFormat: dateFormat,
-                yearFormat: yearFormat
-              });
-            },
-            args: [fmt.dateFormat, fmt.yearFormat]
-          },
-          function (results) {
-            if (chrome.runtime.lastError) {
-              showStatus('Could not read the page: ' + chrome.runtime.lastError.message, true);
-              return;
-            }
-            var data = results && results[0] && results[0].result;
-            if (!data) {
-              showStatus('Could not extract citation data from this page.', true);
-              return;
-            }
-            applyExtractedData(data);
-          }
-        );
+function scanTab(tab) {
+  var fmt = currentFormatSettings();
+  chrome.scripting.executeScript(
+    { target: { tabId: tab.id }, files: ['extractor.js'] },
+    function () {
+      if (chrome.runtime.lastError) {
+        showStatus('Could not access this page: ' + chrome.runtime.lastError.message, true);
+        return;
       }
-    );
-  });
+      chrome.scripting.executeScript(
+        {
+          target: { tabId: tab.id },
+          func: function (dateFormat, yearFormat) {
+            return window.CiteCreatorExtractor.extract(document, location.href, {
+              dateFormat: dateFormat,
+              yearFormat: yearFormat
+            });
+          },
+          args: [fmt.dateFormat, fmt.yearFormat]
+        },
+        function (results) {
+          if (chrome.runtime.lastError) {
+            showStatus('Could not read the page: ' + chrome.runtime.lastError.message, true);
+            return;
+          }
+          var data = results && results[0] && results[0].result;
+          if (!data) {
+            showStatus('Could not extract citation data from this page.', true);
+            return;
+          }
+          applyExtractedData(data);
+        }
+      );
+    }
+  );
 }
 
 function fetchFromTypedUrl() {
