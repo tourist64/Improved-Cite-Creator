@@ -45,8 +45,8 @@ Settings (template, date/year format, bold tagline) are saved per-user via
 
 ## Setup (one-time, ~2 minutes)
 
-Claude Code cannot create Apps Script projects in your Google account
-directly, so set this up yourself:
+Apps Script projects can't be created in your Google account remotely, so
+set this up yourself:
 
 1. Open (or create) the Google Doc you use for carding evidence.
 2. **Extensions -> Apps Script**.
