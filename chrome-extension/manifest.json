@@ -1,21 +1,18 @@
 {
   "manifest_version": 3,
   "name": "Cite Creator",
-  "version": "1.1.0",
-  "description": "Build accurate debate citations from the page you're reading, with author/date/quals you can review before copying.",
+  "version": "2.0.0",
+  "description": "Automatically builds a debate cite for the page you're reading, with keyboard shortcuts to correct any field from your selection.",
   "action": {
     "default_popup": "popup.html"
   },
-  "background": {
-    "service_worker": "background.js"
-  },
+  "options_page": "options.html",
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["extractor.js", "content-script.js"],
+      "js": ["extractor.js", "format.js", "content-script.js"],
       "run_at": "document_idle"
     }
   ],
-  "permissions": ["activeTab", "scripting", "storage"],
-  "host_permissions": ["<all_urls>"]
+  "permissions": ["storage"]
 }

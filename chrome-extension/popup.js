@@ -1,260 +1,49 @@
-var DEFAULT_TEMPLATE =
-  '%last% %y% --- (%first% %last%, %date%, "%title%", %publication%, %url%, %quals%, doa%accessed%) //jx';
-var DEFAULT_SETTINGS = {
-  template: DEFAULT_TEMPLATE,
-  yearFormat: '2',
-  dateFormat: 'M/d/yy',
-  boldTag: true
+var DEFAULTS = {
+  enabled: true,
+  shortcuts: {
+    copy: 'ctrl+alt+c',
+    author: 'ctrl+alt+1',
+    quals: 'ctrl+alt+2',
+    date: 'ctrl+alt+3',
+    title: 'ctrl+alt+4',
+    publication: 'ctrl+alt+5'
+  }
 };
-var FIELD_IDS = ['first', 'last', 'date', 'year', 'title', 'publication', 'quals', 'accessed'];
 
-document.addEventListener('DOMContentLoaded', init);
-
-function init() {
-  chrome.storage.sync.get(DEFAULT_SETTINGS, function (stored) {
-    document.getElementById('template').value = stored.template;
-    document.getElementById('yearFormat').value = stored.yearFormat;
-    document.getElementById('dateFormat').value = stored.dateFormat;
-    document.getElementById('boldTag').checked = stored.boldTag;
-    document.getElementById('accessed').value = CiteCreatorExtractor.formatDate(
-      new Date(),
-      stored.dateFormat
-    );
-    updatePreview();
-  });
-
-  document.getElementById('fetchPageBtn').addEventListener('click', onRescanClick);
-  document.getElementById('fetchUrlBtn').addEventListener('click', fetchFromTypedUrl);
-  document.getElementById('copyBtn').addEventListener('click', onCopyClick);
-  document.getElementById('isOrg').addEventListener('change', applyOrgToggle);
-  document.getElementById('saveSettingsBtn').addEventListener('click', onSaveSettingsClick);
-  document.getElementById('template').addEventListener('input', updatePreview);
-  FIELD_IDS.forEach(function (id) {
-    document.getElementById(id).addEventListener('input', updatePreview);
-  });
-
-  loadCachedOrScan();
-}
-
-/**
- * content-script.js auto-extracts on every page load and caches the result
- * per-tab, so on a normal page this reads instantly with no scan needed.
- * Only falls back to a live scan when nothing's cached yet (e.g. the page
- * was open before the extension loaded, or before content-script.js has
- * finished its first pass).
- */
-function loadCachedOrScan() {
-  chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
-    var tab = tabs[0];
-    if (!tab || !tab.id) {
-      showStatus('No active tab found.', true);
-      return;
-    }
-    document.getElementById('url').value = tab.url || '';
-    if (!/^https?:/i.test(tab.url || '')) {
-      showStatus('Cite Creator can only read regular web pages. Paste a URL below instead.', false);
-      return;
-    }
-    var key = 'cite_' + tab.id;
-    chrome.storage.session.get(key, function (result) {
-      var cached = result[key];
-      if (cached) {
-        applyExtractedData(cached);
-      } else {
-        showStatus('Scanning page...', false);
-        scanTab(tab);
-      }
-    });
-  });
-}
-
-function onRescanClick() {
-  chrome.tabs.query({ active: true, currentWindow: true }, function (tabs) {
-    var tab = tabs[0];
-    if (!tab || !tab.id) {
-      showStatus('No active tab found.', true);
-      return;
-    }
-    if (!/^https?:/i.test(tab.url || '')) {
-      showStatus('Cite Creator can only read regular web pages, not chrome:// or extension pages.', true);
-      return;
-    }
-    showStatus('Re-scanning page...', false);
-    scanTab(tab);
-  });
-}
-
-function showStatus(msg, isError) {
-  var el = document.getElementById('status');
-  el.textContent = msg;
-  el.className = isError ? 'status error' : 'status';
-}
-
-function currentFormatSettings() {
-  return {
-    dateFormat: document.getElementById('dateFormat').value || DEFAULT_SETTINGS.dateFormat,
-    yearFormat: document.getElementById('yearFormat').value || '2'
-  };
-}
-
-function scanTab(tab) {
-  var fmt = currentFormatSettings();
-  chrome.scripting.executeScript(
-    { target: { tabId: tab.id }, files: ['extractor.js'] },
-    function () {
-      if (chrome.runtime.lastError) {
-        showStatus('Could not access this page: ' + chrome.runtime.lastError.message, true);
-        return;
-      }
-      chrome.scripting.executeScript(
-        {
-          target: { tabId: tab.id },
-          func: function (dateFormat, yearFormat) {
-            return window.CiteCreatorExtractor.extract(document, location.href, {
-              dateFormat: dateFormat,
-              yearFormat: yearFormat
-            });
-          },
-          args: [fmt.dateFormat, fmt.yearFormat]
-        },
-        function (results) {
-          if (chrome.runtime.lastError) {
-            showStatus('Could not read the page: ' + chrome.runtime.lastError.message, true);
-            return;
-          }
-          var data = results && results[0] && results[0].result;
-          if (!data) {
-            showStatus('Could not extract citation data from this page.', true);
-            return;
-          }
-          applyExtractedData(data);
-        }
-      );
-    }
-  );
-}
-
-function fetchFromTypedUrl() {
-  var url = document.getElementById('url').value.trim();
-  if (!url) {
-    showStatus('Enter a URL first.', true);
-    return;
-  }
-  if (!/^https?:\/\//i.test(url)) {
-    url = 'https://' + url;
-    document.getElementById('url').value = url;
-  }
-  showStatus('Fetching...', false);
-  fetch(url)
-    .then(function (res) {
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      return res.text();
-    })
-    .then(function (html) {
-      var doc = new DOMParser().parseFromString(html, 'text/html');
-      var data = CiteCreatorExtractor.extract(doc, url, currentFormatSettings());
-      applyExtractedData(data);
-    })
-    .catch(function (err) {
-      showStatus(
-        'Could not fetch that URL: ' + err.message +
-          '. Some sites block automated requests - try "Read current page" while viewing it, or fill fields in by hand.',
-        true
-      );
-    });
-}
-
-function applyExtractedData(data) {
-  document.getElementById('url').value = data.url;
-  document.getElementById('first').value = data.first || '';
-  document.getElementById('last').value = data.last || '';
-  document.getElementById('isOrg').checked = !!data.isOrgAuthor;
-  document.getElementById('date').value = data.date || '';
-  document.getElementById('year').value = data.year || '';
-  document.getElementById('title').value = data.title || '';
-  document.getElementById('publication').value = data.publication || '';
-  document.getElementById('quals').value = data.quals || '';
-  applyOrgToggle();
-
-  if (data.isOrgAuthor) {
-    showStatus(
-      'No individual author found - used "' + data.last + '" as the author. Review every field before copying.',
-      false
-    );
-  } else if (!data.date) {
-    showStatus('No publish date found - please fill it in. Review the other fields too.', true);
-  } else {
-    showStatus('Extracted. Please review every field before copying - especially quals.', false);
-  }
-  updatePreview();
-}
-
-function applyOrgToggle() {
-  var isOrg = document.getElementById('isOrg').checked;
-  var firstField = document.getElementById('first');
-  firstField.disabled = isOrg;
-  if (isOrg) firstField.value = '';
-  updatePreview();
-}
-
-function getFieldValues() {
-  var data = { url: document.getElementById('url').value };
-  FIELD_IDS.forEach(function (id) {
-    data[id] = document.getElementById(id).value;
-  });
-  return data;
-}
-
-function updatePreview() {
-  var template = document.getElementById('template').value || DEFAULT_TEMPLATE;
-  document.getElementById('preview').value = CiteCreatorFormat.buildCitation(template, getFieldValues());
-}
-
-function escapeHtml(str) {
-  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
-function onCopyClick() {
-  var text = document.getElementById('preview').value;
-  if (!text) {
-    showStatus('Nothing to copy yet.', true);
-    return;
-  }
-  var boldTag = document.getElementById('boldTag').checked;
-  var tagEnd = text.indexOf('---');
-  var copyPromise;
-
-  if (boldTag && tagEnd > 0) {
-    var tagline = text.slice(0, tagEnd).trim();
-    var rest = text.slice(tagEnd);
-    var html = '<u><b>' + escapeHtml(tagline) + '</b></u> ' + escapeHtml(rest);
-    copyPromise = navigator.clipboard.write([
-      new ClipboardItem({
-        'text/plain': new Blob([text], { type: 'text/plain' }),
-        'text/html': new Blob([html], { type: 'text/html' })
-      })
+document.addEventListener('DOMContentLoaded', function () {
+  chrome.storage.sync.get(DEFAULTS, function (stored) {
+    document.getElementById('enabled').checked = !!stored.enabled;
+    renderRows('copyShortcut', [
+      [stored.shortcuts.copy, 'Copy the current cite, optionally including any selected text.']
     ]);
-  } else {
-    copyPromise = navigator.clipboard.writeText(text);
-  }
+    renderRows('fieldShortcuts', [
+      [stored.shortcuts.author, 'Author name'],
+      [stored.shortcuts.quals, 'Qualifications'],
+      [stored.shortcuts.date, 'Date'],
+      [stored.shortcuts.title, 'Title'],
+      [stored.shortcuts.publication, 'Publication']
+    ]);
+  });
 
-  copyPromise
-    .then(function () {
-      showStatus("Citation copied - paste it wherever you're carding.", false);
-    })
-    .catch(function (err) {
-      showStatus('Could not copy: ' + err.message, true);
-    });
-}
+  document.getElementById('enabled').addEventListener('change', function (e) {
+    chrome.storage.sync.set({ enabled: e.target.checked });
+  });
 
-function onSaveSettingsClick() {
-  var settings = {
-    template: document.getElementById('template').value || DEFAULT_TEMPLATE,
-    yearFormat: document.getElementById('yearFormat').value,
-    dateFormat: document.getElementById('dateFormat').value || DEFAULT_SETTINGS.dateFormat,
-    boldTag: document.getElementById('boldTag').checked
-  };
-  chrome.storage.sync.set(settings, function () {
-    showStatus('Settings saved.', false);
+  document.getElementById('optionsLink').addEventListener('click', function (e) {
+    e.preventDefault();
+    chrome.runtime.openOptionsPage();
+  });
+});
+
+function renderRows(containerId, rows) {
+  var container = document.getElementById(containerId);
+  container.innerHTML = '';
+  rows.forEach(function (row) {
+    var div = document.createElement('div');
+    var code = document.createElement('code');
+    code.textContent = row[0];
+    div.appendChild(code);
+    div.appendChild(document.createTextNode(' - ' + row[1]));
+    container.appendChild(div);
   });
 }

@@ -1,19 +1,19 @@
 /**
- * DOM-based citation metadata extraction. Runs either against the live
- * document of the tab the user is reading (injected via
- * chrome.scripting.executeScript) or against a DOMParser'd document from a
- * fetched URL - both are plain Document objects, so the same code handles
- * either case.
+ * DOM-based citation metadata extraction, plus a confidence grade based on
+ * how each field was sourced. Runs against the live document of the tab
+ * the user is reading (injected as a content script).
  *
- * Priority per field:
- *   title:       JSON-LD headline -> og:title/twitter:title -> <title>
- *   publication: JSON-LD publisher.name -> og:site_name -> known domain map
- *                -> title-cased domain
+ * Priority per field (highest-confidence source wins):
+ *   title:       JSON-LD headline -> microdata (itemprop=headline) ->
+ *                og:title/twitter:title -> <title>
+ *   publication: JSON-LD publisher.name -> microdata (itemprop=publisher) ->
+ *                og:site_name -> known domain map -> title-cased domain
  *   author:      JSON-LD Person author -> meta author tags -> common byline
  *                selectors in the page -> falls back to the publication
  *                name (never a placeholder like "xxx")
- *   date:        JSON-LD datePublished/dateCreated -> meta published-time
- *                tags -> <time datetime> -> '' if nothing parses
+ *   date:        JSON-LD datePublished/dateCreated -> microdata
+ *                (itemprop=datePublished) -> meta published-time tags ->
+ *                <time datetime> -> a date-shaped phrase in the body text
  */
 (function (global) {
   var KNOWN_PUBLICATIONS = {
@@ -81,6 +81,23 @@
     '.byline-title',
     '.author__title'
   ];
+
+  var MONTHS_PATTERN =
+    'January|February|March|April|May|June|July|August|September|October|November|December|' +
+    'Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sept|Sep|Oct|Nov|Dec';
+  var BODY_DATE_RE = new RegExp('(' + MONTHS_PATTERN + ')\\.?\\s+\\d{1,2},?\\s+\\d{4}', 'i');
+
+  var GRADE_WEIGHTS = {
+    date: { jsonld: 30, microdata: 27, meta: 24, time: 20, regex: 12, manual: 30, none: 0 },
+    // orgdeclared: the page's structured data says the author IS an
+    // organization, so citing the outlet is almost certainly right.
+    // org: no byline found anywhere, so the outlet is a reasonable but
+    // unverified fallback.
+    author: { jsonld: 30, meta: 22, orgdeclared: 26, byline: 12, manual: 30, org: 16, none: 0 },
+    title: { jsonld: 15, microdata: 14, meta: 13, titletag: 7, manual: 15, none: 0 },
+    publication: { jsonld: 15, microdata: 14, meta: 13, domain: 6, manual: 15, none: 0 },
+    quals: { jsonld: 10, byline: 6, manual: 10, none: 4 }
+  };
 
   function cleanText(str) {
     return (str || '').replace(/\s+/g, ' ').trim();
@@ -180,6 +197,13 @@
     return '';
   }
 
+  function itemprop(doc, name) {
+    var el = doc.querySelector('[itemprop="' + name + '"]');
+    if (!el) return '';
+    var val = el.getAttribute('content') || el.getAttribute('datetime') || el.textContent;
+    return val ? val.trim() : '';
+  }
+
   function firstReasonableText(doc, selectors, maxLen) {
     for (var i = 0; i < selectors.length; i++) {
       var el = doc.querySelector(selectors[i]);
@@ -189,6 +213,17 @@
       }
     }
     return '';
+  }
+
+  function findDateInBodyText(doc) {
+    var text = '';
+    try {
+      text = doc.body ? doc.body.innerText || doc.body.textContent || '' : '';
+    } catch (e) {
+      text = '';
+    }
+    var m = BODY_DATE_RE.exec(text.slice(0, 6000));
+    return m ? m[0] : '';
   }
 
   function splitName(name, isOrg) {
@@ -250,23 +285,60 @@
   }
 
   function extract(doc, pageUrl, settings) {
-    settings = settings || { dateFormat: 'M/d/yy', yearFormat: '2' };
+    settings = settings || { dateFormat: 'M-d-yyyy', yearFormat: '2' };
     var jsonLdItems = getJsonLdItems(doc);
     var articleItem = findArticleLikeJsonLd(jsonLdItems);
+    var sources = {};
 
-    var title =
-      (articleItem && articleItem.headline) ||
-      meta(doc, ['meta[property="og:title"]', 'meta[name="twitter:title"]']) ||
-      cleanText(doc.title) ||
-      '';
+    // --- Title ---
+    var title = '';
+    if (articleItem && articleItem.headline) {
+      title = articleItem.headline;
+      sources.title = 'jsonld';
+    } else {
+      var mdTitle = itemprop(doc, 'headline');
+      if (mdTitle) {
+        title = mdTitle;
+        sources.title = 'microdata';
+      } else {
+        var metaTitle = meta(doc, ['meta[property="og:title"]', 'meta[name="twitter:title"]']);
+        if (metaTitle) {
+          title = metaTitle;
+          sources.title = 'meta';
+        } else if (doc.title) {
+          title = doc.title;
+          sources.title = 'titletag';
+        } else {
+          sources.title = 'none';
+        }
+      }
+    }
     title = cleanText(title);
 
-    var publication =
-      (articleItem && articleItem.publisher && articleItem.publisher.name) ||
-      meta(doc, ['meta[property="og:site_name"]']) ||
-      guessPublicationFromDomain(pageUrl);
+    // --- Publication ---
+    var publication = '';
+    if (articleItem && articleItem.publisher && articleItem.publisher.name) {
+      publication = articleItem.publisher.name;
+      sources.publication = 'jsonld';
+    } else {
+      var mdPub = itemprop(doc, 'publisher');
+      if (mdPub) {
+        publication = mdPub;
+        sources.publication = 'microdata';
+      } else {
+        var metaPub = meta(doc, ['meta[property="og:site_name"]']);
+        if (metaPub) {
+          publication = metaPub;
+          sources.publication = 'meta';
+        } else {
+          publication = guessPublicationFromDomain(pageUrl);
+          sources.publication = 'domain';
+        }
+      }
+    }
     publication = cleanText(publication);
 
+    // --- Author ---
     var authorInfo = extractAuthorFromJsonLd(articleItem);
     var isOrgAuthor = false;
     var authorName = '';
@@ -275,6 +347,8 @@
     if (authorInfo && authorInfo.name && !authorInfo.isOrg) {
       authorName = authorInfo.name;
       quals = authorInfo.jobTitle || '';
+      sources.author = 'jsonld';
+      if (quals) sources.quals = 'jsonld';
     } else {
       var metaAuthor = meta(doc, [
         'meta[name="author"]',
@@ -284,21 +358,30 @@
       ]);
       if (metaAuthor && !/^https?:\/\//i.test(metaAuthor)) {
         authorName = metaAuthor;
+        sources.author = 'meta';
       }
     }
 
     if (!authorName) {
       var byline = firstReasonableText(doc, BYLINE_SELECTORS, 80);
-      if (byline) authorName = byline;
+      if (byline) {
+        authorName = byline;
+        sources.author = 'byline';
+      }
     }
 
     if (!quals) {
-      quals = firstReasonableText(doc, QUALS_SELECTORS, 100);
+      var qualsText = firstReasonableText(doc, QUALS_SELECTORS, 100);
+      if (qualsText) {
+        quals = qualsText;
+        sources.quals = 'byline';
+      }
     }
 
     if (!authorName && authorInfo && authorInfo.isOrg && authorInfo.name) {
       authorName = authorInfo.name;
       isOrgAuthor = true;
+      sources.author = 'orgdeclared';
     }
 
     if (!authorName) {
@@ -306,43 +389,114 @@
       // placeholder like "xxx".
       authorName = publication;
       isOrgAuthor = true;
+      sources.author = 'org';
     }
+
+    if (!sources.quals) sources.quals = 'none';
 
     authorName = cleanText(authorName.replace(/^by[:\s]+/i, ''));
     var nameParts = splitName(authorName, isOrgAuthor);
 
-    var dateRaw =
-      (articleItem && (articleItem.datePublished || articleItem.dateCreated)) ||
-      meta(doc, [
-        'meta[property="article:published_time"]',
-        'meta[property="og:published_time"]',
-        'meta[name="date"]',
-        'meta[name="pubdate"]',
-        'meta[name="publish-date"]',
-        'meta[name="sailthru.date"]',
-        'meta[name="parsely-pub-date"]',
-        'time[datetime]'
-      ]) ||
-      '';
+    // --- Date ---
+    var dateRaw = '';
+    if (articleItem && (articleItem.datePublished || articleItem.dateCreated)) {
+      dateRaw = articleItem.datePublished || articleItem.dateCreated;
+      sources.date = 'jsonld';
+    } else {
+      var mdDate = itemprop(doc, 'datePublished') || itemprop(doc, 'dateCreated');
+      if (mdDate) {
+        dateRaw = mdDate;
+        sources.date = 'microdata';
+      } else {
+        var metaDate = meta(doc, [
+          'meta[property="article:published_time"]',
+          'meta[property="og:published_time"]',
+          'meta[name="date"]',
+          'meta[name="pubdate"]',
+          'meta[name="publish-date"]',
+          'meta[name="sailthru.date"]',
+          'meta[name="parsely-pub-date"]'
+        ]);
+        if (metaDate) {
+          dateRaw = metaDate;
+          sources.date = 'meta';
+        } else {
+          var timeEl = doc.querySelector('time[datetime]');
+          var timeVal = timeEl ? timeEl.getAttribute('datetime') : '';
+          if (timeVal) {
+            dateRaw = timeVal;
+            sources.date = 'time';
+          } else {
+            var bodyDate = findDateInBodyText(doc);
+            if (bodyDate) {
+              dateRaw = bodyDate;
+              sources.date = 'regex';
+            } else {
+              sources.date = 'none';
+            }
+          }
+        }
+      }
+    }
 
     var dateObj = parseFlexibleDate(dateRaw);
     var dateFormatted = dateObj ? formatDate(dateObj, settings.dateFormat) : '';
     var year = dateObj
       ? formatDate(dateObj, settings.yearFormat === '4' ? 'yyyy' : 'yy')
       : '';
+    if (dateRaw && !dateObj) {
+      // Couldn't parse it into a Date, but we found *something* - use the
+      // raw text rather than silently dropping it.
+      dateFormatted = cleanText(dateRaw);
+    }
 
     return {
-      url: pageUrl,
-      title: title,
-      publication: publication,
-      first: nameParts.first,
-      last: nameParts.last,
-      isOrgAuthor: isOrgAuthor,
-      quals: cleanText(quals),
-      date: dateFormatted,
-      year: year
+      data: {
+        url: pageUrl,
+        title: title,
+        publication: publication,
+        first: nameParts.first,
+        last: nameParts.last,
+        isOrgAuthor: isOrgAuthor,
+        quals: cleanText(quals),
+        date: dateFormatted,
+        year: year
+      },
+      sources: sources
     };
   }
 
-  global.CiteCreatorExtractor = { extract: extract, formatDate: formatDate };
+  function gradeSources(sources) {
+    sources = sources || {};
+    var score = 0;
+    Object.keys(GRADE_WEIGHTS).forEach(function (field) {
+      var src = sources[field] || 'none';
+      var weights = GRADE_WEIGHTS[field];
+      var w = weights[src];
+      score += w !== undefined ? w : 0;
+    });
+
+    var letter, tier;
+    if (score >= 93) { letter = 'A'; tier = 'good'; }
+    else if (score >= 90) { letter = 'A-'; tier = 'good'; }
+    else if (score >= 87) { letter = 'B+'; tier = 'ok'; }
+    else if (score >= 83) { letter = 'B'; tier = 'ok'; }
+    else if (score >= 80) { letter = 'B-'; tier = 'ok'; }
+    else if (score >= 77) { letter = 'C+'; tier = 'meh'; }
+    else if (score >= 70) { letter = 'C'; tier = 'meh'; }
+    else if (score >= 65) { letter = 'C-'; tier = 'meh'; }
+    else if (score >= 55) { letter = 'D+'; tier = 'bad'; }
+    else if (score >= 45) { letter = 'D'; tier = 'bad'; }
+    else { letter = 'F'; tier = 'bad'; }
+
+    return { score: score, letter: letter, tier: tier };
+  }
+
+  global.CiteCreatorExtractor = {
+    extract: extract,
+    formatDate: formatDate,
+    parseFlexibleDate: parseFlexibleDate,
+    splitName: splitName,
+    grade: gradeSources
+  };
 })(typeof window !== 'undefined' ? window : this);

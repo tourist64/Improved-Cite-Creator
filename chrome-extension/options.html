@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Cite Creator Settings</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+    max-width: 660px;
+    margin: 32px auto 60px;
+    padding: 0 24px;
+    color: #202124;
+    font-size: 14px;
+    line-height: 1.55;
+  }
+  h1 { font-size: 24px; display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+  h2 { font-size: 17px; margin-top: 32px; border-bottom: 1px solid #e0e0e0; padding-bottom: 6px; }
+  code {
+    background: #f1f3f4; padding: 1px 5px; border-radius: 3px;
+    font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 12px;
+  }
+  .switch { position: relative; display: inline-block; width: 52px; height: 27px; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .slider {
+    position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+    background: #b9b9b9; border-radius: 27px; transition: .15s;
+  }
+  .slider:before {
+    position: absolute; content: ""; height: 21px; width: 21px; left: 3px; bottom: 3px;
+    background: #fff; border-radius: 50%; transition: .15s;
+  }
+  .slider:after {
+    content: "OFF"; position: absolute; right: 7px; top: 6px;
+    font-size: 10px; font-weight: 700; color: #fff; letter-spacing: .5px;
+  }
+  input:checked + .slider { background: #34a853; }
+  input:checked + .slider:before { transform: translateX(25px); }
+  input:checked + .slider:after { content: "ON"; left: 8px; right: auto; }
+  label.opt { display: block; margin: 10px 0; }
+  select, input[type="text"], textarea {
+    padding: 6px; border: 1px solid #dadce0; border-radius: 4px;
+    font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 12px;
+  }
+  textarea { width: 100%; box-sizing: border-box; }
+  .radio-row { margin: 14px 0; }
+  .radio-row > label { font-weight: 600; display: block; }
+  .sample {
+    font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 12px;
+    color: #5f6368; margin: 2px 0 0 22px;
+  }
+  table.tokens { border-collapse: collapse; margin-top: 10px; }
+  table.tokens td { padding: 3px 14px 3px 0; vertical-align: top; font-size: 13px; }
+  table.tokens code { white-space: nowrap; }
+  .shortcut-row { display: flex; align-items: center; gap: 12px; margin: 8px 0; }
+  .shortcut-row label { width: 230px; }
+  .shortcut-row input { width: 180px; }
+  #saveBtn {
+    padding: 8px 20px; border: none; border-radius: 4px; background: #1a73e8;
+    color: #fff; font-weight: 600; cursor: pointer; font-size: 13px;
+  }
+  #savedMsg { color: #188038; font-weight: 600; margin-left: 12px; opacity: 0; transition: opacity .2s; }
+  .save-bar { margin-top: 28px; }
+</style>
+</head>
+<body>
+  <h1>
+    Cite Creator Settings
+    <label class="switch"><input type="checkbox" id="enabled"><span class="slider"></span></label>
+  </h1>
+
+  <h2>Instructions</h2>
+  <p>When enabled, Cite Creator automatically computes a cite for the current page and shows it in a
+     small box on the page. Default PC shortcuts use Alt, default Mac shortcuts use Option.</p>
+  <p><code id="copyShortcutLabel">ctrl+alt+c</code> - Copy the current cite, optionally including
+     any selected text, e.g. card text.</p>
+  <p>The letter grade on each cite is a rough measure of how confident you should be in its
+     accuracy. It's based on where each field came from: the page's structured data (JSON-LD or
+     microdata) scores highest, meta tags next, a guess from the page's byline markup lowest - and
+     anything you set yourself counts as certain.</p>
+  <p>To manually modify parts of the cite, select text from the page and press:</p>
+  <table class="tokens" id="shortcutHints"></table>
+
+  <p>Cite Creator is designed to produce cites for US high school and college debate. It works best
+     on major news sites, and doesn't work inside PDFs.</p>
+
+  <h2>Options</h2>
+  <label class="opt">
+    Position of cite box
+    <select id="position">
+      <option value="bottom-right">Bottom Right</option>
+      <option value="bottom-left">Bottom Left</option>
+      <option value="top-right">Top Right</option>
+      <option value="top-left">Top Left</option>
+    </select>
+  </label>
+  <label class="opt"><input type="checkbox" id="copySelectedWithCite"> Copy selected text with cite</label>
+  <label class="opt"><input type="checkbox" id="hideRatings"> Don't show ratings</label>
+  <label class="opt"><input type="checkbox" id="largeFont"> Use large font for cite box</label>
+  <label class="opt"><input type="checkbox" id="useSlashDate"> Use / instead of - in cite dates</label>
+  <label class="opt"><input type="checkbox" id="debugMode"> Debug mode (logs extraction details to the console)</label>
+
+  <h2>Cite Format</h2>
+  <div class="radio-row">
+    <label><input type="radio" name="citeFormatMode" value="standard"> Standard</label>
+    <div class="sample">First Last, Quals, m-d-yyyy, "Title," Publication, URL</div>
+  </div>
+  <div class="radio-row">
+    <label><input type="radio" name="citeFormatMode" value="frontloaded"> Frontloaded</label>
+    <div class="sample">First Last yy, Quals, m-d-yyyy, "Title," Publication, URL</div>
+  </div>
+  <div class="radio-row">
+    <label><input type="radio" name="citeFormatMode" value="twoline"> Two-Line (not recommended)</label>
+    <div class="sample">Last yy<br>(First Last yy, Quals, m-d-yyyy, "Title," Publication, URL)</div>
+  </div>
+  <div class="radio-row">
+    <label><input type="radio" name="citeFormatMode" value="custom"> Custom</label>
+    <textarea id="customTemplate" rows="2"></textarea>
+  </div>
+
+  <p>Custom formats replace the codes between %'s, but retain all other text and whitespace. You can
+     use the following codes:</p>
+  <table class="tokens">
+    <tr><td><code>%author%</code></td><td>Author's full name</td></tr>
+    <tr><td><code>%first%</code></td><td>Author's first name</td></tr>
+    <tr><td><code>%last%</code></td><td>Author's last name (or the publication, if there's no individual author)</td></tr>
+    <tr><td><code>%quals%</code></td><td>Author qualifications, if any</td></tr>
+    <tr><td><code>%date%</code></td><td>Full date</td></tr>
+    <tr><td><code>%y%</code></td><td>1 or 2 digit year</td></tr>
+    <tr><td><code>%title%</code></td><td>Article title</td></tr>
+    <tr><td><code>%publication%</code></td><td>Publication</td></tr>
+    <tr><td><code>%url%</code></td><td>Full URL</td></tr>
+    <tr><td><code>%accessed%</code></td><td>Today's date</td></tr>
+    <tr><td><code>%linebreak%</code></td><td>Add a line break</td></tr>
+  </table>
+
+  <h2>Keyboard Shortcuts</h2>
+  <p>Custom keyboard shortcuts must be a single string (no spaces), e.g. <code>ctrl+alt+c</code> or
+     <code>command+option+1</code> or <code>f2</code>. Some shortcuts may conflict with built-in
+     browser shortcuts or other extensions, so only change these if you know what you're doing.
+     Changes require reloading the current page.</p>
+  <div class="shortcut-row"><label for="scCopy">Copy Cite</label><input type="text" id="scCopy"></div>
+  <div class="shortcut-row"><label for="scAuthor">Author</label><input type="text" id="scAuthor"></div>
+  <div class="shortcut-row"><label for="scQuals">Quals</label><input type="text" id="scQuals"></div>
+  <div class="shortcut-row"><label for="scDate">Date</label><input type="text" id="scDate"></div>
+  <div class="shortcut-row"><label for="scTitle">Title</label><input type="text" id="scTitle"></div>
+  <div class="shortcut-row"><label for="scPublication">Publication</label><input type="text" id="scPublication"></div>
+
+  <div class="save-bar">
+    <button id="saveBtn">Save</button><span id="savedMsg">Saved</span>
+  </div>
+
+  <script src="format.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>

@@ -1,136 +1,158 @@
 # Cite Creator (Chrome extension)
 
-A Manifest V3 Chrome extension that builds debate citations from whatever
-article you're currently viewing - or from a pasted URL.
+A Manifest V3 Chrome extension that automatically computes a debate cite for
+whatever page you're reading and shows it in a small box on the page - no
+clicking, no forms. Keyboard shortcuts copy it, or correct any field from
+your text selection.
 
-This is the sibling of the Google Docs add-on in the repo root, built as a
-separate product per your workflow: no Google Doc required, works on any
-page, and copies a ready-to-paste citation (with the tagline pre-bolded)
-straight to your clipboard.
+It's a rebuild of the cite-creator workflow with a more reliable extraction
+engine underneath, plus a confidence grade so you know when to double-check.
 
-## Why this is more accurate than the original Cite Creator
+## How it works
 
-- Reads the page's actual structured data (JSON-LD `Article`/`NewsArticle`,
-  Open Graph and Twitter meta tags) in a fixed priority order for title,
-  author, date, and publisher, instead of one fragile scrape.
-- Because it runs against the **live rendered page you're already on**
-  (via `chrome.scripting`), it works on JS-rendered pages and pages you're
-  logged into/paywalled past - no separate server fetch that gets blocked
-  or sees a login wall.
-- When there's genuinely no individual byline, it cites the publication or
-  company by name (e.g. `BBC 26`) instead of a placeholder like `xxx`.
-- Every field - author, date, title, publication, qualifications - shows up
-  editable with a live preview **before** you copy anything, so you can fix
-  whatever the parser misses (author quals especially are rarely published
-  as structured data at all, so that field is best-effort and usually needs
-  a manual fill-in).
-- Copies both plain text and rich HTML to the clipboard, so pasting into
-  Google Docs/Word keeps the tagline (before `---`) bold and underlined
-  automatically.
-- Extracts automatically on every page as it loads (a background content
-  script, no click needed) and caches the result per-tab, so opening the
-  popup shows a filled-in citation instantly.
+- Every page you open is scanned automatically (at idle, again on load, and
+  once more ~1.5s later to catch JSON-LD injected by the page's own JS).
+- A small box appears in the corner with the finished cite and a letter
+  grade. Minimize it with `−`, dismiss it for that page with `×`.
+- `ctrl+alt+c` copies the cite (plus your selected text, if that option is
+  on). It copies rich text too, so the tagline before `---` pastes in
+  already bold and underlined.
+- Wrong field? Select the correct text on the page and press its shortcut -
+  the cite and grade update instantly.
+
+| Shortcut | Action |
+|---|---|
+| `ctrl+alt+c` | Copy the cite (optionally with selected text) |
+| `ctrl+alt+1` | Set author from selection |
+| `ctrl+alt+2` | Set qualifications from selection |
+| `ctrl+alt+3` | Set date from selection |
+| `ctrl+alt+4` | Set title from selection |
+| `ctrl+alt+5` | Set publication from selection |
+
+On Mac, Option is the same key as Alt, so these work as-is. All six are
+re-bindable on the options page.
+
+## Why the extraction is more reliable
+
+Fields are resolved in a strict priority order, best source first:
+
+| Field | Priority |
+|---|---|
+| Title | JSON-LD `headline` -> microdata `itemprop=headline` -> `og:title`/`twitter:title` -> `<title>` |
+| Author | JSON-LD `Person` -> author meta tags -> byline selectors (`.byline`, `[rel=author]`, …) -> the publication itself |
+| Date | JSON-LD `datePublished` -> microdata -> published-time meta tags -> `<time datetime>` -> a date-shaped phrase in the body text |
+| Publication | JSON-LD `publisher.name` -> microdata -> `og:site_name` -> known-outlet map -> the domain |
+| Quals | JSON-LD `jobTitle`/`description` -> byline-adjacent selectors |
+
+Concretely, versus the original:
+
+- **Never prints a placeholder for a missing author.** When a page genuinely
+  has no individual byline, it cites the outlet (`BBC News 23`), and the
+  grade reflects whether the page's data explicitly said "the author is an
+  organization" or whether that was just a fallback.
+- **Publication is resolved from real data**, not guessed - no more
+  "No Publication" on a BBC article.
+- **Dates come from structured data first**, so same-day/duplicate dates on
+  the page don't confuse it, with four fallbacks behind that.
+- **It reads the live rendered DOM** of the page you're on, so JS-rendered
+  and logged-in/paywalled pages work.
+- **Anything it gets wrong, you fix in one keystroke** from a selection,
+  rather than retyping it in your doc.
+
+### The letter grade
+
+A rough measure of confidence, scored from where each field came from:
+structured data (JSON-LD/microdata) scores highest, meta tags next, byline
+guesswork lowest - and anything you set yourself counts as certain. An `A`
+means every field came from the page's own structured data. A `C` usually
+means something was inferred (for example the outlet was used as the author
+because no byline was found). Turn ratings off in the options if you'd
+rather not see them.
 
 ## Install (unpacked, ~1 minute)
 
 Chrome Web Store publishing requires a developer account and review, so for
-personal use install it as an unpacked extension:
+personal use install it unpacked:
 
 1. Download/clone this repo, or just this `chrome-extension/` folder.
-2. Open `chrome://extensions` in Chrome.
+2. Open `chrome://extensions`.
 3. Turn on **Developer mode** (top right).
 4. Click **Load unpacked** and select the `chrome-extension/` folder.
-5. Pin it (puzzle-piece icon in the toolbar -> pin "Cite Creator") so it's
-   one click away.
+5. Pin it (puzzle-piece icon -> pin "Cite Creator").
+6. **Reload any tabs you already had open** - content scripts only inject on
+   pages loaded after the extension.
 
-## Using it
+## Options
 
-1. Open the article you want to cite.
-2. Click the Cite Creator icon - the fields are already filled in (a
-   background content script scans every page as it loads, so there's
-   usually nothing to wait for).
-3. Review/correct every field (the preview updates live as you edit).
-4. Click **Copy citation**, then paste it into your card doc.
-
-If a page was open before you loaded the extension (or you navigated
-within a single-page app that changed the article without a full reload),
-the popup falls back to scanning on open, or click **Re-scan page** to
-force a fresh read.
-
-To cite a page you're not currently on, paste its URL into the **Article
-URL** field and click **Fetch this URL instead** - this does a background
-fetch of that page rather than reading your active tab, so it won't work on
-sites that require login or block automated requests; use the current tab
-for those instead.
-
-## Settings
-
-Open the **Settings** section in the popup for:
+Click the extension icon -> **Options** (or right-click the icon ->
+Options):
 
 | Setting | Effect |
 |---|---|
-| Citation template | Same token syntax as the Docs add-on (see below) |
-| Tag year format | 2-digit (`26`) or 4-digit (`2026`) for `%y%` |
-| Date pattern | e.g. `M/d/yy` -> `9/20/26`, `MMMM d, yyyy` -> `September 20, 2026` |
-| Bold tagline on copy | Whether the clipboard's rich-text version bolds/underlines the part before `---` |
+| Position of cite box | Which corner the box sits in |
+| Copy selected text with cite | Appends your page selection (card text) under the cite when copying |
+| Don't show ratings | Hides the letter grade |
+| Use large font for cite box | Bigger box and text |
+| Use / instead of - in cite dates | `7/27/2026` instead of `7-27-2026` |
+| Debug mode | Logs per-field sources and the grade breakdown to the console |
+| Cite Format | Standard / Frontloaded / Two-Line / Custom |
+| Keyboard Shortcuts | Re-bind any of the six shortcuts |
 
-Settings sync via `chrome.storage.sync` (tied to your Chrome sign-in).
+The toolbar popup has the master ON/OFF switch and a shortcut reference.
 
-### Template tokens
+### Cite formats
 
-| Token | Meaning |
-|---|---|
-| `%first%` / `%last%` | Author first/last name (or the publication name when there's no individual author) |
-| `%y%` | Tag year |
-| `%date%` | Full publish date |
-| `%title%` | Article title |
-| `%publication%` | Outlet/publisher name |
-| `%url%` | Source URL |
-| `%quals%` | Author qualifications (usually needs manual entry) |
-| `%accessed%` | Today's date |
+Presets:
 
-Default template:
+```
+Standard      First Last, Quals, m-d-yyyy, "Title," Publication, URL
+Frontloaded   First Last yy, Quals, m-d-yyyy, "Title," Publication, URL
+Two-Line      Last yy
+              (First Last yy, Quals, m-d-yyyy, "Title," Publication, URL)
+```
+
+Custom is the default, preset to:
 
 ```
 %last% %y% --- (%first% %last%, %date%, "%title%", %publication%, %url%, %quals%, doa%accessed%) //jx
 ```
 
-## Permissions, and a note on trimming them
+Custom formats replace the codes between `%`'s and keep all other text and
+whitespace:
 
-`manifest.json` requests:
+| Token | Meaning |
+|---|---|
+| `%author%` | Author's full name |
+| `%first%` / `%last%` | First/last name (last falls back to the publication when there's no individual author) |
+| `%quals%` | Author qualifications, if any |
+| `%date%` | Full publish date |
+| `%y%` | 1 or 2 digit year |
+| `%title%` | Article title |
+| `%publication%` | Publication |
+| `%url%` | Full URL |
+| `%accessed%` | Today's date |
+| `%linebreak%` | Line break |
 
-- `activeTab` + `scripting` - used as a fallback to read the current page on
-  demand (when nothing's cached yet, or you click **Re-scan page**).
-- `storage` - to save your template/format settings, and to cache each
-  tab's auto-extracted data (`chrome.storage.session`, cleared per-tab when
-  it closes and entirely on browser restart - nothing persists beyond that
-  or leaves your machine).
-- `host_permissions: ["<all_urls>"]` - this is the one worth knowing about:
-  it's what lets the background content script (`content-script.js`) run
-  automatically on every site to auto-extract citation data without a
-  click, and is also used by the optional **Fetch this URL instead**
-  feature. Chrome will show this as "read and change all your data on all
-  websites" when you load the extension - the content script only ever
-  reads `document`/meta tags and never modifies the page or sends anything
-  off your machine.
+Empty fields (a missing `%quals%`, say) don't leave dangling commas behind.
 
-If you'd rather trade the automatic, click-free extraction for a narrower
-extension, remove the `content_scripts` block from `manifest.json` (and the
-`background.js`/`chrome.storage.session` cache it feeds) and use the
-**Re-scan page** button on demand instead - `host_permissions` can then
-drop to just what "Fetch this URL instead" needs, or be removed too if you
-also cut that feature.
+## Permissions
+
+- `storage` - saves your settings (synced to your Chrome account).
+- Content script on `<all_urls>` - this is what makes it work automatically
+  everywhere. Chrome shows it as "read and change all your data on all
+  websites". It only ever reads the page's metadata and text, never modifies
+  the page, and nothing leaves your machine.
+
+There's no background service worker and no remote requests.
 
 ## Known limitations
 
-- Author qualifications are rarely present as structured data, so that
-  field is only filled in when the page states it near the byline.
-- Byline detection falls back to common CSS selectors (`.byline`, `.author`,
-  etc.) as a last resort and can occasionally pick up the wrong text -
-  always check it before copying.
-- "Fetch this URL instead" is a plain fetch of that URL's HTML, so it can't
-  see anything behind a login wall - visit the page directly instead.
-- The auto-extract content script runs at `document_idle`, on `load`, and
-  once more ~1.5s later to catch JS-rendered JSON-LD - single-page apps
-  that swap articles in without a full page reload won't re-trigger it, so
-  use **Re-scan page** in that case.
+- Doesn't work inside PDFs, or on `chrome://` pages.
+- Single-page apps that swap articles without a full page load won't
+  re-trigger a scan - reload the page.
+- Author qualifications are rarely published as structured data, so that
+  field is often empty. `ctrl+alt+2` over the author's bio line is the
+  fastest fix.
+- Byline detection falls back to common CSS selectors, which can
+  occasionally grab the wrong text - that's what the grade is warning you
+  about.
